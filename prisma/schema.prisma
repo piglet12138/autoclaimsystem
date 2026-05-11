@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Employee {
+  id          Int       @id @default(autoincrement())
+  feishuUid   String    @unique @map("feishu_uid")
+  employeeNo  String?   @map("employee_no")
+  nameCn      String?   @map("name_cn")
+  nameEn      String?   @map("name_en")
+  department  String?
+  hireDate    DateTime? @map("hire_date") @db.Date
+  isActive    Boolean   @default(true) @map("is_active")
+  isAdmin     Boolean   @default(false) @map("is_admin")
+  syncedAt    DateTime? @map("synced_at")
+
+  // Feishu user access token (stored after OAuth login)
+  accessToken  String?   @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  tokenExpiresAt DateTime? @map("token_expires_at")
+
+  claims          Claim[]
+  monthlyPayments MonthlyPayment[]
+
+  @@map("employees")
+}
+
+model Claim {
+  id                   Int       @id @default(autoincrement())
+  employeeId           Int       @map("employee_id")
+  category             String    @db.VarChar(32)
+  price                Decimal   @db.Decimal(10, 2)
+  startDate            DateTime  @map("start_date") @db.Date
+  endDate              DateTime  @map("end_date") @db.Date
+  totalMonths          Int       @map("total_months")
+  monthlyAmount        Decimal   @map("monthly_amount") @db.Decimal(10, 3)
+  attachmentPath       String?   @map("attachment_path")
+  status               String    @default("pending") @db.VarChar(16)
+  approvalInstanceId   String?   @map("approval_instance_id") @db.VarChar(64)
+  approverUid          String?   @map("approver_uid") @db.VarChar(64)
+  approvedAt           DateTime? @map("approved_at")
+  rejectReason         String?   @map("reject_reason")
+  submittedAt          DateTime  @default(now()) @map("submitted_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  employee        Employee         @relation(fields: [employeeId], references: [id])
+  monthlyPayments MonthlyPayment[]
+
+  @@map("claims")
+}
+
+model MonthlyPayment {
+  id          Int      @id @default(autoincrement())
+  claimId     Int      @map("claim_id")
+  employeeId  Int      @map("employee_id")
+  category    String   @db.VarChar(32)
+  month       DateTime @db.Date
+  amount      Decimal  @db.Decimal(10, 3)
+  actuallyPay Decimal? @map("actually_pay") @db.Decimal(10, 3)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  claim    Claim    @relation(fields: [claimId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("monthly_payments")
+}
+
+model Config {
+  key   String @id @db.VarChar(64)
+  value Json
+
+  @@map("config")
+}

@@ -1,0 +1,79 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: autoclaim
+      POSTGRES_PASSWORD: autoclaim
+      POSTGRES_DB: autoclaim
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autoclaim"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://autoclaim:autoclaim@db:5432/autoclaim?schema=public"
+      FEISHU_APP_ID: "${FEISHU_APP_ID}"
+      FEISHU_APP_SECRET: "${FEISHU_APP_SECRET}"
+      FEISHU_APPROVAL_CODE: "${FEISHU_APPROVAL_CODE}"
+      FEISHU_VERIFICATION_TOKEN: "${FEISHU_VERIFICATION_TOKEN}"
+      FEISHU_ENCRYPT_KEY: "${FEISHU_ENCRYPT_KEY}"
+      FEISHU_BASE_URL: "https://open.feishu.cn"
+      FEISHU_BITABLE_TOKEN: "${FEISHU_BITABLE_TOKEN}"
+      FEISHU_DEPT_TABLE_ID: "${FEISHU_DEPT_TABLE_ID}"
+      NEXTAUTH_SECRET: "${NEXTAUTH_SECRET}"
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL}"
+      NEXT_PUBLIC_FEISHU_APP_ID: "${FEISHU_APP_ID}"
+      ADMIN_UIDS: "${ADMIN_UIDS}"
+      SUPER_ADMIN_UID: "${SUPER_ADMIN_UID}"
+      NEXT_PUBLIC_SUPER_ADMIN_UID: "${NEXT_PUBLIC_SUPER_ADMIN_UID}"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+    expose:
+      - "3000"
+
+  # HTTPS reverse proxy (self-signed cert)
+  # Port configurable via HTTPS_PORT, default 9000
+  # docker compose --profile production up -d
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    profiles: ["production"]
+    ports:
+      - "${HTTPS_PORT:-9000}:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+      - ./scripts/nginx-docker.conf:/etc/nginx/conf.d/default.conf:ro
+      - uploads:/app/uploads:ro
+    depends_on:
+      - app
+
+  # Poll Feishu approval status every 2 minutes (fallback)
+  # docker compose --profile production up -d
+  poller:
+    image: alpine:3.19
+    restart: unless-stopped
+    profiles: ["production"]
+    depends_on:
+      - app
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "*/2 * * * * wget -qO- --post-data='' http://app:3000/api/approval/poll" | crontab -
+        crond -f -l 2
+
+volumes:
+  pgdata:
+  uploads:
