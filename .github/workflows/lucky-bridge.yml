@@ -1,0 +1,62 @@
+name: Lucky Agent
+
+# Wraps anthropics/claude-code-action@v1 (MIT) and routes inference through
+# the Lucky bridge by setting ANTHROPIC_BASE_URL + PATH_TO_CLAUDE_CODE_EXECUTABLE.
+# Reuses the official wrapper for checkout / branch / commit / PR / safety,
+# rather than reimplementing it in bash.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, labeled, assigned]
+
+jobs:
+  lucky:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@lucky')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@lucky')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@lucky')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@lucky') || contains(github.event.issue.title, '@lucky')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install lucky CLI + persist auth
+        env:
+          LUCKY_BRIDGE_URL: ${{ secrets.LUCKY_BRIDGE_URL }}
+          CLAUDE_CODE_OAUTH_REFRESH_TOKEN: ${{ secrets.LUCKY_AGENT_OAUTH_REFRESH_TOKEN }}
+          CLAUDE_CODE_OAUTH_SCOPES: ${{ secrets.LUCKY_AGENT_OAUTH_SCOPES || 'user:inference user:profile user:sessions:claude_code' }}
+        run: |
+          set -e
+          curl -fsSL "$LUCKY_BRIDGE_URL/install.sh" | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          lucky --version || true
+          lucky auth login >auth.log 2>&1 || { echo "::error::lucky auth login failed"; cat auth.log; exit 1; }
+          echo "auth login OK"
+
+      - name: Run lucky agent via official MIT action
+        uses: anthropics/claude-code-action@v1
+        with:
+          trigger_phrase: "@lucky"
+          github_token: ${{ github.token }}
+          claude_code_oauth_token: ${{ secrets.LUCKY_AGENT_OAUTH_REFRESH_TOKEN }}
+          claude_args: |
+            --max-turns 10
+            --max-budget-usd 1.00
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.LUCKY_BRIDGE_URL }}
+          PATH_TO_CLAUDE_CODE_EXECUTABLE: /home/runner/.local/bin/lucky
